@@ -8,196 +8,261 @@
  */
 
 preferences {
-	input("destIp", "text", title: "IP", description: "The device IP")
+    input("destIp", "text", title: "IP", description: "The device IP")
     input("destPort", "number", title: "Port", description: "The port you wish to connect")
-    input("inputChan","enum", title: "Input Control", description: "Select the inputs you want to use", options: ["TUNER","HDMI1","HDMI2","HDMI3","HDMI4","HDMI5","AV1","AV2","AV3","AV4","AV5","V-AUX","AUDIO1","AUIDO2","SERVER","NET RADIO","USB"],multiple: true,required: true)
 }
- 
+
 
 metadata {
-	definition (name: "Yamaha Network Receiver", namespace: "KristopherKubicki", 
-    	author: "kristopher@acm.org") {
+    definition (name: "Yamaha Network Receiver", namespace: "KristopherKubicki", author: "kristopher@acm.org") {
         capability "Actuator"
-	capability "Switch" 
+        capability "Switch"
         capability "Polling"
         capability "Switch Level"
-        
+
         attribute "mute", "string"
         attribute "input", "string"
-        attribute "inputChan", "enum"
-        
+        attribute "model_name", "string"
+
         command "mute"
         command "unmute"
-        command "inputSelect", ["string"]
-        command "inputNext"
         command "toggleMute"
-        
-      	}
+        command "zoneOneOn"
+        command "zoneOneOff"
+        command "zoneTwoOn"
+        command "zoneTwoOff"
+        command "configure"
+    }
 
-	simulator {
-		// TODO-: define status and reply messages here
-	}
+    simulator {
+        // TODO-: define status and reply messages here
+    }
 
-	tiles {
-		standardTile("switch", "device.switch", width: 2, height: 2, canChangeIcon: false, canChangeBackground: true) {
-            state "on", label: '${name}', action:"switch.off", backgroundColor: "#79b821", icon:"st.Electronics.electronics16"
-            state "off", label: '${name}', action:"switch.on", backgroundColor: "#ffffff", icon:"st.Electronics.electronics16"
+    tiles(scale: 2) {
+        standardTile("main", "device.switch", width: 2, height: 2, canChangeIcon: false, canChangeBackground: false) {
+            state "on", label: '${name}', action:"switch.off", backgroundColor: "#79b821", icon:"st.Electronics.electronics13"
+            state "off", label: '${name}', action:"switch.on", backgroundColor: "#ffffff", icon:"st.Electronics.electronics13"
         }
-		standardTile("poll", "device.poll", width: 1, height: 1, canChangeIcon: false, inactiveLabel: true, canChangeBackground: false) {
-			state "poll", label: "", action: "polling.poll", icon: "st.secondary.refresh", backgroundColor: "#FFFFFF"
-		}
-        standardTile("input", "device.input", width: 1, height: 1, canChangeIcon: false, inactiveLabel: true, canChangeBackground: false) {
-			state "input", label: '${currentValue}', action: "inputNext", icon: "", backgroundColor: "#FFFFFF"
-		}
+        standardTile("zone1", "device.switchZone1", width: 2, height: 2, canChangeIcon: false, canChangeBackground: true) {
+            state "on", label: 'zone 1', action:"zoneOneOff", backgroundColor: "#79b821", icon:"st.Electronics.electronics16"
+            state "off", label: 'zone 1', action:"zoneOneOn", backgroundColor: "#ffffff", icon:"st.Electronics.electronics16"
+        }
+        standardTile("zone2", "device.switchZone2", width: 2, height: 2, canChangeIcon: false, canChangeBackground: true) {
+            state "on", label: 'zone 2', action:"zoneTwoOff", backgroundColor: "#79b821", icon:"st.Electronics.electronics16"
+            state "off", label: 'zone 2', action:"zoneTwoOn", backgroundColor: "#ffffff", icon:"st.Electronics.electronics16"
+        }
         standardTile("mute", "device.mute", width: 1, height: 1, canChangeIcon: false, inactiveLabel: true, canChangeBackground: false) {
             state "muted", label: '${name}', action:"unmute", backgroundColor: "#79b821", icon:"st.Electronics.electronics13"
             state "unmuted", label: '${name}', action:"mute", backgroundColor: "#ffffff", icon:"st.Electronics.electronics13"
-		}
-        controlTile("level", "device.level", "slider", height: 1, width: 2, inactiveLabel: false, range: "(0..100)") {
-			state "level", label: '${name}', action:"setLevel"
-		}
-        
-		main "switch"
-        details(["switch","input","mute","level","poll"])
-	}
+        }
+        controlTile("level", "device.level", "slider", height: 1, width: 5, inactiveLabel: false, range: "(0..100)") {
+            state "level", label: '${name}', action:"setLevel"
+        }
+        valueTile("input", "device.input", width: 6, height: 2, decoration: 'flat') {
+            state "input", label: '${currentValue}'
+        }
+        standardTile("poll", "device.poll", width: 1, height: 1, canChangeIcon: false, inactiveLabel: true, canChangeBackground: false) {
+            state "poll", label: "", action: "polling.poll", icon: "st.secondary.refresh", backgroundColor: "#FFFFFF"
+        }
+
+        main "main"
+        details(["main", "zone1", "zone2", "mute", "level", "input"])
+    }
 }
 
+def setOrGet(name, value) {
+  if(value == null) {
+    return device.currentValue(name)
+  }
+  else {
+    sendEvent(name: name, value: value)
+    return value
+  }
+}
 
+def getVolumeXml(state, mute, level) {
+    if(state == 'off' || mute == 'muted') {
+      return "<Volume><Mute>On</Mute></Volume>"
+    }
+    else {
+      def int dB = level * 9 - 800
+      log.debug "scaled $dB"
+      dB = ((dB/5) as Integer) * 5
+      log.debug "scaled $dB"
+
+      return "<Volume><Lvl><Val>${dB}</Val><Exp>1</Exp><Unit>dB</Unit></Lvl></Volume>"
+    }
+}
+
+def configure(config) {
+    def input = setOrGet('input', config['input'])
+    def level = setOrGet('level', config['level'])
+    def mute  = setOrGet('mute', config['mute'])
+    def zone1 = setOrGet('switchZone1', config['zone1'])
+    def zone2 = setOrGet('switchZone2', config['zone2'])
+
+    log.debug("input[$input], level[$level], mute[$mute], zone1[$zone1], zone2[$zone2]")
+
+    def inputXml = "<Input><Input_Sel>${input}</Input_Sel></Input>"
+    put("<System><Party_Mode><Mode>On</Mode></Party_Mode></System><Main_Zone>${getVolumeXml(zone1, mute, level)}${inputXml}</Main_Zone><Zone_2>${getVolumeXml(zone2, mute, level)}</Zone_2>")
+}
+
+def initialize() {
+    log.debug "Yamaha Initialize"
+}
+
+def installed() {
+    log.debug "Yamaha Installed"
+}
+
+def updated() {
+    log.debug "Yamaha Updated"
+}
 
 def parse(String description) {
- 	def map = stringToMap(description)
+    def map = stringToMap(description)
     if(!map.body) { return }
-	def body = new String(map.body.decodeBase64())
+    def body = new String(map.body.decodeBase64())
+    log.debug "body: " + body
 
-	def statusrsp = new XmlSlurper().parseText(body)
-	def power = statusrsp.Main_Zone.Basic_Status.Power_Control.Power.text()
-    if(power == "On") { 
-    	sendEvent(name: "switch", value: 'on')
-    }
-    if(power != "" && power != "On") { 
-    	sendEvent(name: "switch", value: 'off')
-    }
-    
-    def inputChan = statusrsp.Main_Zone.Basic_Status.Input.Input_Sel.text()
-    if(inputChan != "") { 
-    	sendEvent(name: "input", value: inputChan)
-	}
+    def r = new XmlSlurper().parseText(body)
 
-    def muteLevel = statusrsp.Main_Zone.Basic_Status.Volume.Mute.text()
-    if(muteLevel == "On") { 
-    	sendEvent(name: "mute", value: 'muted')
-	}
+    if(r.System.Config.Model_Name) {
+        log.debug "Model: " + r.System.Config.Model_Name
+        createEvent(name: "model_name", value: r.System.Config.Model_Name)
+    }
+    createEvent(name: "model_name", value: "Go Fuck Yourself")
+
+    def power = r.Main_Zone.Basic_Status.Power_Control.Power.text()
+    if(power == "On") {
+        sendEvent(name: "switch", value: 'on')
+    }
+    if(power != "" && power != "On") {
+        sendEvent(name: "switch", value: 'off')
+    }
+
+    def inputChan = r.Main_Zone.Basic_Status.Input.Input_Sel.text()
+    if(inputChan != "") {
+    log.debug "input: $inputChan"
+        sendEvent(name: "input", value: inputChan.replace('OPTICAL', 'O'))
+    }
+
+    def muteLevel = r.Main_Zone.Basic_Status.Volume.Mute.text()
+    if(muteLevel == "On") {
+        sendEvent(name: "mute", value: 'muted')
+    }
     if(muteLevel != "" && muteLevel != "On") {
-	    sendEvent(name: "mute", value: 'unmuted')
+        sendEvent(name: "mute", value: 'unmuted')
     }
-    
-    if(statusrsp.Main_Zone.Basic_Status.Volume.Lvl.Val.text()) { 
-    	def int volLevel = statusrsp.Main_Zone.Basic_Status.Volume.Lvl.Val.toInteger() ?: -250
-        volLevel = sprintf("%d",(((volLevel + 800) / 9)/5)*5)
-   		def int curLevel = 65
+
+    if(r.Main_Zone.Basic_Status.Volume.Lvl.Val.text()) {
+        def int volLevel = r.Main_Zone.Basic_Status.Volume.Lvl.Val.toInteger() ?: -250
+        log.debug "volume (dB): $volLevel"
+        volLevel = (((volLevel + 800) / 9)/5)*5
+        log.debug "volume (percent): $volLevel"
+           def int curLevel = 65
         try {
-        	curLevel = device.currentValue("level")
-        } catch(NumberFormatException nfe) { 
-        	curLevel = 65
+            curLevel = device.currentValue("level")
+        } catch(org.codehaus.groovy.runtime.typehandling.GroovyCastException nfe) {
+            curLevel = 65
         }
         if(curLevel != volLevel) {
-    		sendEvent(name: "level", value: volLevel)
+            sendEvent(name: "level", value: volLevel)
         }
     }
 }
 
-// Needs to round to the nearest 5
-def setLevel(val) {
-	sendEvent(name: "mute", value: "unmuted")     
-    sendEvent(name: "level", value: val)
-    
-    	def scaledVal = sprintf("%d",val * 9 - 800)
-    	scaledVal = ((scaledVal/5) as Integer) * 5
-    	request("<YAMAHA_AV cmd=\"PUT\"><Main_Zone><Volume><Lvl><Val>$scaledVal</Val><Exp>1</Exp><Unit>dB</Unit></Lvl></Volume></Main_Zone></YAMAHA_AV>")
+def setLevel(value) {
+    log.debug "setLevel($value)"
+    configure(level: value)
 }
 
-def on() {
-	sendEvent(name: "switch", value: 'on')
-	request('<YAMAHA_AV cmd=\"PUT\"><Main_Zone><Power_Control><Power>On</Power></Power_Control></Main_Zone></YAMAHA_AV>')
+def on(args) {
+    log.debug "on()"
+    sendEvent(name: "switch", value: 'on')
+    put('<Main_Zone><Power_Control><Power>On</Power></Power_Control></Main_Zone>')
 }
 
 def off() {
-	sendEvent(name: "switch", value: 'off')
-	request('<YAMAHA_AV cmd="PUT"><Main_Zone><Power_Control><Power>Standby</Power></Power_Control></Main_Zone></YAMAHA_AV>')
+    log.debug "off()"
+    sendEvent(name: "switch", value: 'off')
+    put('<Main_Zone><Power_Control><Power>Standby</Power></Power_Control></Main_Zone>')
+}
+
+def zoneOneOn(evt) {
+    log.debug "zoneOneOn()"
+    configure(zone1: 'on')
+}
+
+def zoneOneOff(evt) {
+    log.debug "zoneOneOff()"
+    configure(zone1: 'off')
+}
+
+def zoneTwoOn() {
+    log.debug "zoneTwoOn()"
+    configure(zone2: 'on')
+}
+
+def zoneTwoOff() {
+    log.debug "zoneTwoOff()"
+    configure(zone2: 'off')
 }
 
 def toggleMute(){
-    if(device.currentValue("mute") == "muted") { unmute() }
-	else { mute() }
+    device.currentValue("mute") == "muted" ? unmute() : mute()
 }
 
-def mute() { 
-	sendEvent(name: "mute", value: "muted")
-	request('<YAMAHA_AV cmd="PUT"><Main_Zone><Volume><Mute>On</Mute></Volume></Main_Zone></YAMAHA_AV>')
+def mute() {
+    configure(mute: 'muted')
 }
 
-def unmute() { 
-	sendEvent(name: "mute", value: "unmuted")
-	request('<YAMAHA_AV cmd="PUT"><Main_Zone><Volume><Mute>Off</Mute></Volume></Main_Zone></YAMAHA_AV>')
+def unmute() {
+    configure(mute: 'unmuted')
 }
 
-def inputNext() { 
-
-	def cur = device.currentValue("input")
-	// modify your inputs right here! 
-    def selectedInputs = ["HDMI1","HDMI2","HDMI5","AV1","HDMI1"]
-    
-    
-    def semaphore = 0
-    for(selectedInput in selectedInputs) {
-    	if(semaphore == 1) { 
-        	return inputSelect(selectedInput)
-        }
-    	if(cur == selectedInput) { 
-        	semaphore = 1
-        }
-    }
-}
-
-
-def inputSelect(channel) {
- 	sendEvent(name: "input", value: channel	)
-	request("<YAMAHA_AV cmd=\"PUT\"><Main_Zone><Input><Input_Sel>$channel</Input_Sel></Input></Main_Zone></YAMAHA_AV>")
-}
-
-def poll() { 
-	refresh()
+def poll() {
+    log.debug "poll"
+    refresh()
 }
 
 def refresh() {
-    request('<YAMAHA_AV cmd="GET"><Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone></YAMAHA_AV>')
+    log.debug "refresh"
+    get('<System><Config>GetParam</Config></System>');
 }
 
-def request(body) { 
+def get(body) {
+    request('<YAMAHA_AV cmd="GET">' + body + '</YAMAHA_AV>')
+}
 
+def put(body) {
+    request('<YAMAHA_AV cmd="PUT">' + body + '</YAMAHA_AV>')
+}
+
+def request(body) {
+    log.debug "request: " + body
     def hosthex = convertIPtoHex(destIp)
     def porthex = convertPortToHex(destPort)
-    device.deviceNetworkId = "$hosthex:$porthex" 
+    device.deviceNetworkId = "$hosthex:$porthex"
 
     def hubAction = new physicalgraph.device.HubAction(
-   	 		'method': 'POST',
-    		'path': "/YamahaRemoteControl/ctrl",
-        	'body': body,
-        	'headers': [ HOST: "$destIp:$destPort" ]
-		) 
-        
- //   log.debug hubAction    
-        
+      'method': 'POST',
+      'path': "/YamahaRemoteControl/ctrl",
+      'body': body,
+      'headers': [ HOST: "$destIp:$destPort" ]
+    )
+
+    //log.debug "HUB Action: $hubAction"
+
     hubAction
 }
 
-
-private String convertIPtoHex(ipAddress) { 
+private String convertIPtoHex(ipAddress) {
     String hex = ipAddress.tokenize( '.' ).collect {  String.format( '%02X', it.toInteger() ) }.join()
     return hex
 }
 
 private String convertPortToHex(port) {
-	String hexport = port.toString().format( '%04X', port.toInteger() )
+    String hexport = port.toString().format( '%04X', port.toInteger() )
     return hexport
 }
